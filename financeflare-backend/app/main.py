@@ -13,7 +13,10 @@ logger = logging.getLogger("financeflare")
 app = FastAPI(title="FinanceFlare Backend")
 
 def create_tables():
-    Base.metadata.create_all(bind=engine)
+    try:
+        Base.metadata.create_all(bind=engine)
+    except Exception as e:
+        print(f"Error creating tables: {e}")
 
 @app.on_event("startup")
 def on_startup():
@@ -25,6 +28,3 @@ logger.info("Router included successfully!")
 @app.get("/")
 def root():
     return {"message": "Welcome to the FinanceFlare API!"}
-
-def create_tables():
-    Base.metadata.create_all(bind=engine)
