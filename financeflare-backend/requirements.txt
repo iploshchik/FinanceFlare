@@ -6,3 +6,5 @@ psycopg2-binary
 SQLAlchemy
 python-multipart
 python-dotenv
+python-jose
+passlib

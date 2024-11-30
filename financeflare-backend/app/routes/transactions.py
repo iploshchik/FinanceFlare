@@ -1,21 +1,43 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from fastapi import UploadFile, File
 import pandas as pd
+from fastapi.security import OAuth2PasswordBearer
+from jose import JWTError, jwt
 from app.database import get_db
 from app.models import Transaction, TransactionCreate, TransactionResponse, CategoryRule
 from app.services.categorization import categorize_transaction
+from app.utils.auth import SECRET_KEY, ALGORITHM
 
 router = APIRouter()
 
+# Authentication
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
+
+def get_current_user(token: str = Depends(oauth2_scheme)):
+    """Retrieves the current user from the token."""
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            raise HTTPException(status_code=401, detail="Invalid authentication")
+        return username
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid authentication")
+
 @router.get("/transactions/", response_model=List[TransactionResponse])
-def get_transactions(db: Session = Depends(get_db)):
-    transactions = db.query(Transaction).all()
-    return transactions
+def get_transactions(db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
+    """
+    Fetch all transactions for the authenticated user.
+    """
+    return db.query(Transaction).all()
 
 @router.post("/transactions/", response_model=TransactionResponse)
-def create_transaction(transaction: TransactionCreate, db: Session = Depends(get_db)):
+def create_transaction(transaction: TransactionCreate, db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
+    """
+    Add a new transaction for the authenticated user.
+    """
     new_transaction = Transaction(
         date=transaction.date,
         description=transaction.description,
@@ -27,15 +49,23 @@ def create_transaction(transaction: TransactionCreate, db: Session = Depends(get
     db.refresh(new_transaction)
     return new_transaction
 
+
 @router.get("/transactions/{transaction_id}", response_model=TransactionResponse)
-def get_transaction(transaction_id: int, db: Session = Depends(get_db)):
+def get_transaction(transaction_id: int, db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
+    """
+    Fetch a specific transaction by ID for the authenticated user.
+    """
     transaction = db.query(Transaction).filter(Transaction.id == transaction_id).first()
     if not transaction:
         raise HTTPException(status_code=404, detail="Transaction not found")
     return transaction
 
+
 @router.put("/transactions/{transaction_id}", response_model=TransactionResponse)
-def update_transaction(transaction_id: int, updated_data: TransactionCreate, db: Session = Depends(get_db)):
+def update_transaction(transaction_id: int, updated_data: TransactionCreate, db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
+    """
+    Update a transaction by ID for the authenticated user.
+    """
     transaction = db.query(Transaction).filter(Transaction.id == transaction_id).first()
     if not transaction:
         raise HTTPException(status_code=404, detail="Transaction not found")
@@ -48,8 +78,12 @@ def update_transaction(transaction_id: int, updated_data: TransactionCreate, db:
     db.refresh(transaction)
     return transaction
 
+
 @router.delete("/transactions/{transaction_id}")
-def delete_transaction(transaction_id: int, db: Session = Depends(get_db)):
+def delete_transaction(transaction_id: int, db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
+    """
+    Delete a specific transaction by ID for the authenticated user.
+    """
     transaction = db.query(Transaction).filter(Transaction.id == transaction_id).first()
     if not transaction:
         raise HTTPException(status_code=404, detail="Transaction not found")
@@ -58,8 +92,12 @@ def delete_transaction(transaction_id: int, db: Session = Depends(get_db)):
     db.commit()
     return {"message": "Transaction deleted successfully"}
 
+
 @router.post("/transactions/upload/")
-def upload_transactions(file: UploadFile = File(...), db: Session = Depends(get_db)):
+def upload_transactions(file: UploadFile = File(...), db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
+    """
+    Upload and process a file of transactions for the authenticated user.
+    """
     try:
         # Read file into a pandas DataFrame
         if file.filename.endswith(".csv"):
@@ -71,9 +109,7 @@ def upload_transactions(file: UploadFile = File(...), db: Session = Depends(get_
 
         # Process DataFrame and save transactions
         for _, row in df.iterrows():
-            # Use categorization logic if 'category' is not provided
             category = row.get("category", categorize_transaction(row["description"], db))
-
             transaction = Transaction(
                 date=row["date"],
                 description=row["description"],
@@ -88,8 +124,9 @@ def upload_transactions(file: UploadFile = File(...), db: Session = Depends(get_
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to process file: {str(e)}")
 
+
 @router.post("/rules/")
-def add_rule(keyword: str, category: str, db: Session = Depends(get_db)):
+def add_rule(keyword: str, category: str, db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
     # Debug: Print received data
     print(f"Received keyword: {keyword}, category: {category}")
 
@@ -110,12 +147,12 @@ def add_rule(keyword: str, category: str, db: Session = Depends(get_db)):
     return rule
 
 @router.get("/rules/")
-def get_rules(db: Session = Depends(get_db)):
+def get_rules(db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
     rules = db.query(CategoryRule).all()
     return rules
 
 @router.delete("/rules/{rule_id}")
-def delete_rule(rule_id: int, db: Session = Depends(get_db)):
+def delete_rule(rule_id: int, db: Session = Depends(get_db), current_user: str = Depends(get_current_user)):
     rule = db.query(CategoryRule).filter(CategoryRule.id == rule_id).first()
     if not rule:
         raise HTTPException(status_code=404, detail="Rule not found")
@@ -123,3 +160,49 @@ def delete_rule(rule_id: int, db: Session = Depends(get_db)):
     db.delete(rule)
     db.commit()
     return {"message": "Rule deleted successfully"}
+
+from typing import Optional
+from fastapi import Query
+
+@router.get("/transactions/filter/")
+def filter_transactions(
+        category: Optional[str] = None,
+        min_amount: Optional[float] = None,
+        max_amount: Optional[float] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        search: Optional[str] = None,
+        sort_by: Optional[str] = Query(None, regex="^(date|amount|category)$"),
+        db: Session = Depends(get_db),
+        current_user: str = Depends(get_current_user),
+):
+    """
+    Retrieve filtered, searched, and sorted transactions for the authenticated user.
+    """
+    query = db.query(Transaction)
+
+    # Apply filters
+    if category:
+        query = query.filter(Transaction.category == category)
+    if min_amount:
+        query = query.filter(Transaction.amount >= min_amount)
+    if max_amount:
+        query = query.filter(Transaction.amount <= max_amount)
+    if start_date:
+        query = query.filter(Transaction.date >= start_date)
+    if end_date:
+        query = query.filter(Transaction.date <= end_date)
+    if search:
+        query = query.filter(Transaction.description.ilike(f"%{search}%"))
+
+    # Apply sorting
+    if sort_by:
+        if sort_by == "date":
+            query = query.order_by(Transaction.date)
+        elif sort_by == "amount":
+            query = query.order_by(Transaction.amount)
+        elif sort_by == "category":
+            query = query.order_by(Transaction.category)
+
+    return query.all()
+

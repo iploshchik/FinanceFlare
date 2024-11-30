@@ -38,5 +38,13 @@ class CategoryRule(Base):
     keyword = Column(String, unique=True, nullable=False)
     category = Column(String, nullable=False)
 
+class User(Base):
+    __tablename__ = "users"  # Name of the database table
+
+    id = Column(Integer, primary_key=True, index=True)  # Unique identifier
+    username = Column(String, unique=True, nullable=False)  # Username (must be unique)
+    hashed_password = Column(String, nullable=False)  # Password (hashed for security)
+
+
 
 
