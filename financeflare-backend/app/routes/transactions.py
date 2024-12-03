@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import func
 from typing import List, Optional
 from fastapi import UploadFile, File
 import pandas as pd
@@ -205,4 +206,52 @@ def filter_transactions(
             query = query.order_by(Transaction.category)
 
     return query.all()
+
+@router.get("/transactions/summary/")
+def get_transaction_summary(db: Session = Depends(get_db)):
+    """
+    Get a summary of transactions: total income, total expenses, and net balance.
+    """
+    total_income = db.query(func.sum(Transaction.amount)).filter(Transaction.amount > 0).scalar() or 0
+    total_expenses = db.query(func.sum(Transaction.amount)).filter(Transaction.amount < 0).scalar() or 0
+    net_balance = total_income + total_expenses
+
+    return {
+        "total_income": total_income,
+        "total_expenses": total_expenses,
+        "net_balance": net_balance
+    }
+
+@router.get("/transactions/category-breakdown/")
+def get_category_breakdown(db: Session = Depends(get_db)):
+    """
+    Get a breakdown of transaction totals by category.
+    """
+    category_data = (
+        db.query(Transaction.category, func.sum(Transaction.amount).label("total"))
+        .group_by(Transaction.category)
+        .all()
+    )
+
+    return [{"category": category, "total": total} for category, total in category_data]
+
+@router.get("/transactions/monthly-trends/")
+def get_monthly_trends(db: Session = Depends(get_db)):
+    """
+    Get monthly income and expense trends.
+    """
+    monthly_data = (
+        db.query(
+            func.date_trunc("month", Transaction.date).label("month"),
+            func.sum(Transaction.amount).label("total")
+        )
+        .group_by(func.date_trunc("month", Transaction.date))
+        .order_by(func.date_trunc("month", Transaction.date))
+        .all()
+    )
+
+    income_data = [{"month": month.strftime("%Y-%m"), "total": total} for month, total in monthly_data if total > 0]
+    expense_data = [{"month": month.strftime("%Y-%m"), "total": total} for month, total in monthly_data if total < 0]
+
+    return {"income_trends": income_data, "expense_trends": expense_data}
 

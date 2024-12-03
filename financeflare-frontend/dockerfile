@@ -1,0 +1,19 @@
+FROM node:16
+
+# Set working directory
+WORKDIR /app
+
+# Copy package.json and package-lock.json first
+COPY package*.json ./
+
+# Install dependencies
+RUN npm install
+
+# Copy the rest of the app's code
+COPY . .
+
+# Expose the port for the app
+EXPOSE 3000
+
+# Start the React app
+CMD ["npm", "start"]
